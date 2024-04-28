@@ -8,36 +8,37 @@ class GatheringEnv:
     def __init__(self, grid_size=(10, 15), apples=20, N_apple=10, N_tagged=2, max_time_steps=1000, tag_hits=2):
         self.grid_size = grid_size
 
-        self.grid = np.zeros(grid_size)
+        self.grid = np.zeros(grid_size, dtype=int)
 
-        self.beam_count=0
-        self.both_play=0
+        self.beam_count = 0
+        self.both_play = 0
         self.beam_rate = 0
         self.max_time_steps = max_time_steps
         self.time_step = 0
 
         self.apples = apples
-        self.apple_positions = []
         self.N_apple = N_apple
 
         self.N_tagged = N_tagged
 
         self.tag_hits = tag_hits
 
+        self.penalty = 0.5
+        self.coop = 0.5
+
         self.players = [
-            {'position': (0, 0), 'orientation': 0, 'tagged': 0, 'tag_timer': 0},
-            {'position': (0, 0), 'orientation': 0, 'tagged': 0, 'tag_timer': 0}
+            {'position': None, 'orientation': 0, 'tagged': 0, 'tag_timer': 0},
+            {'position': None, 'orientation': 0, 'tagged': 0, 'tag_timer': 0}
         ]
         self.reset()
 
     def reset(self):
         self.grid.fill(0)
         self._place_apples()
-        self.players[0]['position'] = (self.grid_size[0]//2, self.grid_size[1]//2)
-        self.players[1]['position'] = (self.grid_size[0]//2, self.grid_size[1]//2 +1)
         for player in self.players:
             player['tagged'] = 0
             player['tag_timer'] = 0
+            player['position'] = None
         self._update_grid()
         self.beam_count = 0
         self.both_play = 0
@@ -46,32 +47,57 @@ class GatheringEnv:
         return self._get_observations()
 
     def _place_apples(self):
-        self.apple_positions = []
         self.apple_grid = np.ones(self.grid_size, dtype=int)*-1
+
         for _ in range(self.apples):
-            position = (rnd.randint(0, self.grid_size[0]), rnd.randint(0, self.grid_size[1]))
+            count = self.apple_grid.size  # in case we generate an already existing position
+            while count > 0:
+                position = (rnd.randint(0, self.grid_size[0]), rnd.randint(0, self.grid_size[1]))
+                if self.apple_grid[position] != 0:
+                    break
+                count -= 1
+
             self.apple_grid[position] = 0
-            self.apple_positions.append(position)
 
     def step(self, actions):
 
         self.time_step += 1
+
         rewards = [0]*len(self.players)
+        penalties = [0]*len(self.players)
+        coops = [0] * len(self.players)
+
+        for i, action in enumerate(actions):
+            if action == 6:
+                penalties[i] = self.penalty
+            elif action == 7:
+                coops[i] = self.coop
 
         self._respawn_apples()
 
+        # Calculate cooperation points after all actions have been processed
+        #coops = self.calculate_cooperation_points()
+
+        # calculate rewrds
         for i in range(len(self.players)):
-          new_position = self._update_player_position(i, actions[i])
-          #collect apple
-          if self.grid[new_position] == 3 and self.players[i]['tagged'] == 0: #there is an apple and not tagged
-              self.grid[new_position] == 0
-              self.apple_grid[new_position] = self.N_apple
-              rewards[i] += 1  # Reward for collecting an apple
+          next_position = self._update_player_position(i, actions[i])
+          prev_position = self.players[i]['position']
+
+
+          if next_position != prev_position and self.players[i]['tagged'] < self.tag_hits:
+
+            if self.grid[next_position] == 3: #there is an apple
+                self.apple_grid[next_position] = self.N_apple  # set the timer for the apple
+                rewards[i] += 1  # collect an apple
+
+            self.grid[prev_position] = 0  # reset position
+            self.grid[next_position] = i+1  # move the player to this position
+            self.players[i]['position'] = next_position
+
 
         #todo update for more agents
         if self.players[0]['tagged'] < self.tag_hits and self.players[1]['tagged'] < self.tag_hits:
             self.both_play += 1
-
 
         # respawn a player if tagged for enough time
         for i, player in enumerate(self.players):
@@ -91,19 +117,28 @@ class GatheringEnv:
         else:
             dones = [False] * len(self.players)
 
-        return self._get_observations(), rewards, dones
+        return self._get_observations(), rewards, coops, penalties, dones
 
     def _update_grid(self):
-      for i, player in enumerate(self.players):
-         player = self.players[i]
-         if player['tagged'] == 0:
-             self.grid[player['position']] = i+1  # position player i
+        for x in range(self.grid_size[0]):
+            for y in range(self.grid_size[1]):
+                if self.apple_grid[x, y] == 0: #check if not removed
+                    self.grid[x, y] = 3  # place apples
+                else:
+                    self.grid[x, y] = 0
 
-      for position in self.apple_positions:
-         if self.apple_grid[position] == 0: #check if not removed
-             self.grid[position] = 3  # place apples
-         else:
-             self.grid[position] = 0
+        for i, player in enumerate(self.players):
+            player = self.players[i]
+            if player['tagged'] == 0:
+                for x in range(self.grid_size[0]):
+                    if player['position'] is not None:
+                        break
+                    for y in range(self.grid_size[1]):
+                        if self.grid[x, y] == 0:
+                            player['position'] = (x, y)
+                            self.grid[x, y] = i+1  # position player i
+                            break
+
 
     def _get_observations(self):
         return np.copy(self.grid), np.copy(self.grid)
@@ -130,10 +165,6 @@ class GatheringEnv:
         if player['tagged'] == self.tag_hits: #tagged then skip turn
             return position
 
-        orientation = player['orientation']
-        x=player['position'][0]
-        y=player['position'][1]
-
         if action == 6:
             self.beam_count += 1
             self._apply_beam(player_index)
@@ -142,10 +173,16 @@ class GatheringEnv:
         #stand still
         if action == 7:
             return position
-        next_position = (-1,-1)
+
+        orientation = player['orientation']
+        x = player['position'][0]
+        y = player['position'][1]
+
+        next_position = None
+
         if action == 0:  # forward
             if orientation == 0:  # up
-               next_position = (x,y-1)
+               next_position = (x, y-1)
             elif  orientation == 1: #right
                 next_position = (x+1, y)
             elif  orientation == 2: #down
@@ -204,15 +241,17 @@ class GatheringEnv:
             else: #left
                 player['orientation'] = 0
 
-        other_indexes = [i for i in range(1, len(self.players)+1) if i != player_index]
+        other_indexes = [i+1 for i in range(len(self.players)) if i != player_index]
 
-        # account for out of grid cases or stepping on the other player
-        if not(0 <= next_position[0] < self.grid_size[0] and
-            0 <= next_position[1] < self.grid_size[1] and
-            self.grid[next_position] not in other_indexes):
+        if next_position is None:
             next_position = position
 
-        self.grid[next_position] = 1 + player_index
+        # account for out of grid cases or stepping on the other player
+        if not (0 <= next_position[0] < self.grid_size[0] and
+                0 <= next_position[1] < self.grid_size[1] and
+                self.grid[next_position] not in other_indexes):
+
+            next_position = position
 
         return next_position
 
@@ -246,11 +285,27 @@ class GatheringEnv:
                 target['tag_timer'] = self.N_tagged
                 self.grid[target['position']] = 0 #remove player
     def _respawn_apples(self):
-        for position in self.apple_positions:
-            if self.apple_grid[position] > 0:
-                self.apple_grid[position] -= 1
-                if self.apple_grid[position] == 0:
-                    self.grid[position] = 3 # respawn
+        for x in range(self.grid_size[0]):
+            for y in range(self.grid_size[1]):
+                if self.apple_grid[x, y] > 0:
+                    self.apple_grid[x, y] -= 1
+                    if self.apple_grid[x, y] == 0:
+                        # should be respawn in a free frid cell
+                        self.respawn_oneapple(x, y)
+
+
+    def respawn_oneapple(self, x, y):
+        if self.grid[x, y] == 0:
+            self.grid[x, y] = 3  # respawn
+        else:
+            for i in range(self.grid_size[0]):
+                for j in range(self.grid_size[1]):
+                    if self.grid[i, j] == 0:
+                        self.grid[i, j] = 3  # respawn
+                        self.apple_grid[i, j] = 0  # move here
+                        self.apple_grid[x, y] = -1  # remove old
+                        return
+
     def respawn_agent(self, tagged_player_index):
 
         new_position = (random.randint(0, self.grid_size[0]-1), random.randint(0, self.grid_size[1])-1)
@@ -259,4 +314,26 @@ class GatheringEnv:
 
         self.players[tagged_player_index]['position'] = new_position
         self.players[tagged_player_index]['tagged'] = 0
-        self.grid[new_position] = tagged_player_index
+        self.grid[new_position] = tagged_player_index+1
+
+    def calculate_cooperation_points(self):
+        players_collected_apples = [False] * len(self.players)
+
+        for idx, player in enumerate(self.players):
+            if self.grid[player['position']] == 3:  # check if on an apple
+                players_collected_apples[idx] = True
+
+        # award points if both players collected apples and were adjacent
+        if all(players_collected_apples):
+            for idx, player in enumerate(self.players):
+                for other_idx, other_player in enumerate(self.players):
+                    if idx != other_idx and self.is_adjacent(player['position'], other_player['position']):
+                        self.players[idx]['cooperation_points'] += 0.5
+                        self.players[other_idx]['cooperation_points'] += 0.5
+
+    def is_adjacent(self, pos1, pos2):
+        return (abs(pos1[0] - pos2[0]) <= 1 and abs(pos1[1] - pos2[1]) <= 1)
+
+
+
+

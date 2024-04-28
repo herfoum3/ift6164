@@ -2,12 +2,12 @@
 import torch.nn as nn
 import torch.nn.functional as F
 class QNetwork(nn.Module):
-    def __init__(self, input_dim, action_space=8):
+    def __init__(self, input_dim, hidden_dim=32, action_space=8):
         super(QNetwork, self).__init__()
-        self.fc1 = nn.Linear(input_dim, 32)
-        self.fc2 = nn.Linear(32, 32)
-        self.fc3 = nn.Linear(32, 32)
-        self.output = nn.Linear(32, action_space)
+        self.fc1 = nn.Linear(input_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim)
+        self.fc3 = nn.Linear(hidden_dim, hidden_dim)
+        self.output = nn.Linear(hidden_dim, action_space)
 
     def forward(self, x):
         #flattening the tensor to 2D tensor batch_size*flattened_grid_size
