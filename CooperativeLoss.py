@@ -12,12 +12,12 @@ class CooperativeLoss(nn.Module):
         self.lambda_coop = lambda_coop
         self.lambda_pena = lambda_pena
 
-    def forward(self, predicted, target, coop, penalty):
+    def forward(self, predicted, target, r, rtot, penalty):
         """
         predicted: Predicted Q-values from the model (tensor)
         target: target Q-values calculated from Bellman equation (tensor)
-        coop: cooperative reward (float)
-
+        r: reward (float)
+        rtot: total reward (float)
         penalty: Penalties incurred for aggressive actions (tensor or float).
         return: Computed loss value.
         """
@@ -26,14 +26,16 @@ class CooperativeLoss(nn.Module):
         mse_loss = torch.nn.functional.mse_loss(predicted, target)
 
         # cooperative loss component
-        coop = torch.as_tensor(coop, device=predicted.device, dtype=predicted.dtype)
-        if coop.dim() > 0:
-            coop_loss = coop.mean()
+        r = torch.as_tensor(r, device=predicted.device, dtype=predicted.dtype)
+        rtot = torch.as_tensor(rtot, device=predicted.device, dtype=predicted.dtype)
+        coop_loss = 1-r/(rtot+0.001)  #adding a small value to prevent divide by zero
+        if coop_loss.dim() > 0:
+            coop_loss = coop_loss.mean()
 
         # penalty loss component
-        penalty = torch.as_tensor(penalty, device=predicted.device, dtype=predicted.dtype)
-        if penalty.dim() > 0:
-            penalty_loss = penalty.mean()
+        penalty_loss = torch.as_tensor(penalty, device=predicted.device, dtype=predicted.dtype)
+        if penalty_loss.dim() > 0:
+            penalty_loss = penalty_loss.mean()
 
         # total loss
         total_loss = mse_loss - self.lambda_coop * coop_loss + self.lambda_pena * penalty_loss

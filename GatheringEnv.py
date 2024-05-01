@@ -65,18 +65,18 @@ class GatheringEnv:
 
         rewards = [0]*len(self.players)
         penalties = [0]*len(self.players)
-        coops = [0] * len(self.players)
+        #coops = [0] * len(self.players)
 
         for i, action in enumerate(actions):
             if action == 6:
                 penalties[i] = self.penalty
-            elif action == 7:
-                coops[i] = self.coop
+            #elif action == 7:
+            #    coops[i] = self.coop
 
         self._respawn_apples()
 
         # Calculate cooperation points after all actions have been processed
-        #coops = self.calculate_cooperation_points()
+        # coops = self.calculate_cooperation_points()
 
         # calculate rewrds
         for i in range(len(self.players)):
@@ -117,7 +117,7 @@ class GatheringEnv:
         else:
             dones = [False] * len(self.players)
 
-        return self._get_observations(), rewards, coops, penalties, dones
+        return self._get_observations(), rewards, penalties, dones
 
     def _update_grid(self):
         for x in range(self.grid_size[0]):

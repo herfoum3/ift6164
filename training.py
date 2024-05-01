@@ -33,6 +33,7 @@ def train_double_agents(env,
                         episodes, batch_size, gamma):
 
     rates = []
+    foods = np.zeros(2, dtype=int)
     for episode in range(episodes):
         states = toTensor(env.reset()) # TODO may be just use directly a tensor for the grid
         dones = [False, False]
@@ -41,22 +42,21 @@ def train_double_agents(env,
         agent1.q_network.train()
         agent2.q_network.train()
 
-        foods = np.zeros(2, dtype=int)
         while not all(dones):
 
             action1 = agent1.select_action(states[0])
             action2 = agent2.select_action(states[1])
 
-            next_states, rewards, coops, penalties, dones = env.step([action1, action2])
+            next_states, rewards, penalties, dones = env.step([action1, action2])
             next_states = toTensor(next_states)
             #dones = toTensor(dones)
             foods += rewards
-            #if foods[0] == 30:
-            #    print(30)
-            print(foods)
 
-            agent1.buffer.push(states[0], action1, rewards[0], coops[0], penalties[0], next_states[0], dones[0])
-            agent2.buffer.push(states[1], action2, rewards[1], coops[1], penalties[1], next_states[1], dones[1])
+            #print(foods)
+
+            rtot = np.sum(rewards)
+            agent1.buffer.push(states[0], action1, rewards[0], rtot, penalties[0], next_states[0], dones[0])
+            agent2.buffer.push(states[1], action2, rewards[1], rtot, penalties[1], next_states[1], dones[1])
 
             states = next_states
 
@@ -68,15 +68,15 @@ def train_double_agents(env,
                     batch_actions = []
                     batch_rewards = []
                     batch_penalties = []
-                    batch_coops = []
+                    batch_rtots = []
                     batch_next_states = []
                     batch_dones = []
                     for elem in batch:
                         batch_states.append(elem[0])
                         batch_actions.append(elem[1])
                         batch_rewards.append(elem[2])
-                        batch_penalties.append(elem[3])
-                        batch_coops.append(elem[4])
+                        batch_rtots.append(elem[3])
+                        batch_penalties.append(elem[4])
                         batch_next_states.append(elem[5])
                         batch_dones.append(elem[6])
 
@@ -84,15 +84,15 @@ def train_double_agents(env,
                     batch_next_states = torch.stack(batch_next_states).float().to(device)
                     batch_actions = torch.tensor(batch_actions, dtype=torch.long, device=device)
                     batch_rewards = torch.tensor(batch_rewards, dtype=torch.float32, device=device)
+                    batch_rtots = torch.tensor(batch_rtots, dtype=torch.float32, device=device)
                     batch_penalties = torch.tensor(batch_penalties, dtype=torch.float32, device=device)
-                    batch_coops = torch.tensor(batch_coops, dtype=torch.float32, device=device)
                     batch_dones = torch.tensor(batch_dones, dtype=torch.int, device=device)
 
                     current_q_values  = agent.q_network(batch_states).gather(1, batch_actions.unsqueeze(1))
                     max_next_q_values = agent.q_network(batch_next_states).detach().max(1)[0]
                     expected_q_values = batch_rewards + (gamma * max_next_q_values * (1 - batch_dones))
 
-                    agent.loss = agent.loss_fn(current_q_values, expected_q_values.unsqueeze(1), batch_coops, batch_penalties)
+                    agent.loss = agent.loss_fn(current_q_values, expected_q_values.unsqueeze(1), batch_rewards, batch_rtots, batch_penalties)
 
                     agent.optimizer.zero_grad()
                     agent.loss.backward()
@@ -102,7 +102,8 @@ def train_double_agents(env,
 
         rates.append(env.beam_rate)
 
-    return np.average(rates)
+    return np.mean(rates), [np.mean(foods[0]), np.mean(foods[1])]
+
 
 
 
